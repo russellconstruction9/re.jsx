@@ -1,28 +1,23 @@
+from flask import Flask, render_template, request, send_file
 import pandas as pd
 from fpdf import FPDF
 
-# Function to calculate spray foam insulation estimates
+app = Flask(__name__)
+
+# Constants
+COST_PER_SET = 2200  # Cost per set of spray foam
+BOARD_FEET_PER_SET = {"open-cell": 18000, "closed-cell": 4000}
+LABOR_COST_PER_SQFT = {"open-cell": 0.50, "closed-cell": 1.25}
+
+# Function to calculate spray foam estimate
 def calculate_spray_foam_estimate(length, width, height, insulation_type, location_factor=1.0):
-    """Estimate the cost of spray foam insulation based on project details."""
+    if insulation_type not in BOARD_FEET_PER_SET:
+        raise ValueError("Invalid insulation type. Choose 'open-cell' or 'closed-cell'.")
 
-    # Constants
-    COST_PER_SET = 2200  # Cost per set of spray foam
-    BOARD_FEET_PER_SET = {
-        "open-cell": 18000,  # Average between 16,000-20,000
-        "closed-cell": 4000,
-    }
-    LABOR_COST_PER_SQFT = {
-        "open-cell": 0.50,  # Estimated labor cost per sq ft
-        "closed-cell": 1.25,
-    }
-
-    # Calculations
-    square_footage = length * width  # Assume flat ceiling/walls
-    board_feet_needed = square_footage * height  # Cubic feet estimation
+    square_footage = length * width
+    board_feet_needed = square_footage * height
     sets_needed = board_feet_needed / BOARD_FEET_PER_SET[insulation_type]
     material_cost = sets_needed * COST_PER_SET
-
-    # Adjust for location factor (labor variations per region)
     labor_cost = (square_footage * LABOR_COST_PER_SQFT[insulation_type]) * location_factor
     total_cost = material_cost + labor_cost
 
@@ -33,38 +28,56 @@ def calculate_spray_foam_estimate(length, width, height, insulation_type, locati
         "Square Footage": square_footage,
         "Board Feet Needed": board_feet_needed,
         "Sets Needed": round(sets_needed, 2),
-        "Material Cost ($)": round(material_cost, 2),
-        "Labor Cost ($)": round(labor_cost, 2),
-        "Total Cost ($)": round(total_cost, 2),
+        "Material Cost ($)": f"${round(material_cost, 2):,.2f}",
+        "Labor Cost ($)": f"${round(labor_cost, 2):,.2f}",
+        "Total Cost ($)": f"${round(total_cost, 2):,.2f}",
     }
 
 # Function to generate a PDF quote
-def generate_quote_pdf(estimate_data, filename="Spray_Foam_Estimate.pdf"):
+def generate_quote_pdf(estimate_data):
     pdf = FPDF()
     pdf.add_page()
-    
     pdf.set_font("Arial", "B", 16)
     pdf.cell(200, 10, "Spray Foam Insulation Estimate", ln=True, align="C")
     pdf.ln(10)
-    
     pdf.set_font("Arial", "", 12)
-    
+
     for key, value in estimate_data.items():
-        pdf.cell(200, 10, f"{key}: {value}", ln=True, align="L")
-    
+        pdf.cell(80, 10, f"{key}:", border=1)
+        pdf.cell(100, 10, f"{value}", border=1, ln=True)
+
     pdf.ln(10)
-    pdf.cell(200, 10, "Thank you for using our spray foam estimation tool!", ln=True, align="L")
+    pdf.cell(200, 10, "Thank you for using our spray foam estimator!", ln=True, align="L")
 
-    pdf.output(filename)
-    return filename
+    pdf_filename = "Spray_Foam_Estimate.pdf"
+    pdf.output(pdf_filename)
+    return pdf_filename
 
-# Sample estimation for a 40x60 building with 12ft height using closed-cell insulation
-estimate_result = calculate_spray_foam_estimate(40, 60, 12, "closed-cell", location_factor=1.1)
+# Flask Routes
+@app.route("/", methods=["GET", "POST"])
+def home():
+    estimate_result = None
+    error_message = None
 
-# Generate and save the quote as a PDF
-pdf_filename = generate_quote_pdf(estimate_result)
+    if request.method == "POST":
+        try:
+            length = float(request.form["length"])
+            width = float(request.form["width"])
+            height = float(request.form["height"])
+            insulation_type = request.form["insulation_type"]
+            location_factor = float(request.form["location_factor"])
 
-# Convert results to DataFrame for easier readability
-df_estimate = pd.DataFrame([estimate_result])
-print(df_estimate)
+            estimate_result = calculate_spray_foam_estimate(length, width, height, insulation_type, location_factor)
 
+        except ValueError as e:
+            error_message = str(e)
+
+    return render_template("index.html", estimate=estimate_result, error=error_message)
+
+@app.route("/download_pdf")
+def download_pdf():
+    pdf_filename = generate_quote_pdf(request.args)
+    return send_file(pdf_filename, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(debug=True)
